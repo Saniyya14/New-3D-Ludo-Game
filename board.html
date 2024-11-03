@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Three.js - Ludo Board</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -applesystem, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+            Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+        html, body {
+            height: 100vh;
+            width: 100vw;
+        }
+        #threejs-container {
+            position: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.js"></script>
+    <script src="https://cdn.rawgit.com/mrdoob/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <button id="roll-dice-button" style="position: absolute; top: 20px; left: 20px; padding: 10px; font-size: 16px;">Roll Dice</button>
+    <div id="dice-result" style="position: absolute; top: 60px; left: 20px; font-size: 20px; color: white;"></div>
+    <button id="move-piece-button" style="position: absolute; top: 20px; left: 720px; padding: 10px; font-size: 16px;">Roll</button>
+    <div id="dice-total" style="position: absolute; top: 60px; left: 720px; font-size: 20px; color: white;"></div>
+
+    <div id="threejs-container"></div>
+    <script type="module">
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x262626);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+        scene.add(ambientLight);
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(0, 10, 20);
+        light.castShadow = true;
+        scene.add(light);
+
+        // Plane geometry for the base
+        const planeGeometry = new THREE.PlaneGeometry(100, 100);
+        const planeMaterial = new THREE.MeshPhongMaterial({ color: 0xd2b48c });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotateX(-Math.PI / 2);
+        plane.position.y = -2.75;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // Game board geometry (Changed to brown)
+        const boardGeometry = new THREE.BoxGeometry(20, 1, 20);
+        const boardMaterial = new THREE.MeshPhongMaterial({ color: 0xDEB887}); // Brown color
+        const board = new THREE.Mesh(boardGeometry, boardMaterial);
+        board.position.set(0, 1, 0);
+        board.castShadow = true;
+        scene.add(board);
+
+        // Create planes at the corners of the board
+        const createCornerPlane = (x, z, color) => {
+            const geometry = new THREE.PlaneGeometry(7, 7);
+            const material = new THREE.MeshBasicMaterial({ color: color });
+            const cornerPlane = new THREE.Mesh(geometry, material);
+            cornerPlane.rotation.x = -Math.PI / 2;
+            cornerPlane.position.set(x, 1.6, z);
+            scene.add(cornerPlane);
+
+            // Create a white plane at the center of the colored corner plane
+            const whitePlaneGeometry = new THREE.PlaneGeometry(5, 5);
+            const whitePlaneMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const whitePlane = new THREE.Mesh(whitePlaneGeometry, whitePlaneMaterial);
+            whitePlane.rotation.x = -Math.PI / 2;
+            whitePlane.position.set(x, 1.6 + 0.05, z);
+            scene.add(whitePlane);
+        };
+
+        // Create four corner planes
+        createCornerPlane(-6.5, -6.5, 0xff0000); // Bottom-left corner (Red)
+        createCornerPlane(6.5, -6.5, 0x00ff00);  // Bottom-right corner (Green)
+        createCornerPlane(-6.5, 6.5, 0x0000ff);  // Top-left corner (Blue)
+        createCornerPlane(6.5, 6.5, 0xffff00);   // Top-right corner (Yellow)
+
+        // Function to create 2D text
+        const createText = (text, position) => {
+            // Create a canvas element
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+
+            // Set the canvas size
+            canvas.width = 256;
+            canvas.height = 128;
+
+            // Set text properties
+            context.font = 'bold 48px Arial';
+            context.fillStyle = 'black';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+
+            // Draw text
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            // Create texture from the canvas
+            const texture = new THREE.CanvasTexture(canvas);
+            
+            // Create a sprite material
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            
+            // Create the sprite
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(5, 2.5, 1); // Scale the sprite to the desired size
+            sprite.position.copy(position); // Position the sprite
+
+            // Add the sprite to the scene
+            scene.add(sprite);
+        };
+
+        // Create the central area
+        const centralAreaGeometry = new THREE.BoxGeometry(5.9, 0.1, 5.9);
+        const centralAreaMaterial = new THREE.MeshBasicMaterial({ color: 0xeeeeee });
+        const centralArea = new THREE.Mesh(centralAreaGeometry, centralAreaMaterial);
+        centralArea.position.set(0, 1.5, 0);
+        scene.add(centralArea);
+
+        // Add the text "Home" above the central area
+        createText("HOME", new THREE.Vector3(0, 2.5, 0)); // Adjust Y position as needed
+
+        const createGamePieces = (x, z, color, colorName) => {
+            const pieceGeometry = new THREE.SphereGeometry(0.4, 34, 34);
+            const pieceMaterial = new THREE.MeshPhongMaterial({
+                color: color, // Keep the base color
+                shininess: 50, // Increase shininess
+                specular: 0xffffff // Set specular color to white for a brighter highlight
+            });
+            const pieces = [];
+        
+            for (let i = 0; i < 4; i++) {
+                const piece = new THREE.Mesh(pieceGeometry, pieceMaterial);
+                piece.position.set(x + (i % 2) * 1.2 - 1.2, 1.8 + 0.2, z + Math.floor(i / 2) * 1.2 - 1.2);
+                
+                // Assign ID based on color
+                piece.userData = {
+                    id: `${colorName}${i + 1}` // Example: 'red1', 'red2', etc.
+                };
+        
+                pieces.push(piece); // Store the piece in an array
+                scene.add(piece);
+            }
+        
+            return pieces; // Return the array of pieces if needed
+        };
+
+        // Create game pieces for each color with IDs
+        const redPieces = createGamePieces(-6, -6, 0xff0000, 'red'); // Red pieces
+        const greenPieces = createGamePieces(7, -6, 0x00ff00, 'green');  // Green pieces
+        const bluePieces = createGamePieces(-6, 6.9, 0x0000ff, 'blue');  // Blue pieces
+        const yellowPieces = createGamePieces(7, 6.9, 0xffff00, 'yellow'); // Yellow pieces
+
+        // Function to create a small plane with a specific ID and color
+        const createSmallPlane = (x, z, id, color) => {
+            const smallPlaneGeometry = new THREE.PlaneGeometry(2, 1.08); // Size of the small plane
+            const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+            const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+            
+            smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+            smallPlane.position.set(x, 1.55, z); // Adjust the Y position to be above the board
+            smallPlane.userData = { id: id }; // Assign unique ID
+
+            scene.add(smallPlane); // Add the plane to the scene
+        };
+
+        // Function to create multiple small planes with unique IDs
+        const createMultipleSmallPlanes = (count, baseX, baseZ, spacing) => {
+            for (let i = 0; i < count; i++) {
+                const zPosition = baseZ + i * spacing; // Adjust z position for each plane
+                const smallPlaneId = `y${i}`; // Generate unique ID (y0, y1, y2, ...)
+                
+                // Change the color of the second plane (y1) to yellow
+                const planeColor = (i === 1) ? 0xffff00 : 0xffffff; // Yellow for y1, white for others
+                
+                createSmallPlane(baseX, zPosition, smallPlaneId, planeColor); // Create small plane at specified position
+            }
+        };
+
+        // Call the function to create 6 small planes with the same x position and different z positions
+        createMultipleSmallPlanes(6, 2, 3.5, 1.2); // x = 2, initial z = 3.5, spacing = 1.2
+
+
+        //BLue (6-11)
+        // Function to create a small plane with a specific ID
+        const createSingleSmallPlane = (x, z, id) => {
+            const smallPlaneGeometry = new THREE.PlaneGeometry(2, 1.08); // Size of the small plane
+            const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff }); // Color of the plane
+            const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+            
+            smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+            smallPlane.position.set(x, 1.55, z); // Adjust the Y position to be above the board
+            smallPlane.userData = { id: id }; // Assign unique ID
+
+            scene.add(smallPlane); // Add the plane to the scene
+        };
+
+        // Function to create multiple small planes with unique IDs starting from y6
+        const createMultipleSmallPlanesStartingFromY6 = (count, baseX, baseZ, spacing) => {
+            for (let i = 0; i < count; i++) {
+                const zPosition = baseZ + i * spacing; // Adjust z position for each plane
+                const smallPlaneId = `b${i + 6}`; // Generate unique ID starting from b6 
+                createSingleSmallPlane(baseX, zPosition, smallPlaneId); // Create small plane at specified position
+            }
+        };
+
+        // Call the function to create 6 small planes with IDs starting from y6
+        createMultipleSmallPlanesStartingFromY6(6, -2, 3.5, 1.2); // x = 2, initial z = 3.5, spacing = 1.2
+
+
+
+        // Function to create a small plane at a specific position on the board
+        // Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoard = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(2, 1.08);
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: id === 'r4' ? 0xff0000 : color }); // Use red color for r1, otherwise use the passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+  
+    smallPlane.rotation.x = -Math.PI / 2;
+    smallPlane.position.set(x, 1.6, z);
+    smallPlane.userData = { id: id };
+  
+    scene.add(smallPlane);
+  };
+
+        // Base position for all small planes
+        const basePosition = { x: -2, z: -9.5 }; // Adjust this for overall position
+        const offsets = [0, 1.2, 2.4, 3.6, 4.8, 6]; // Offsets for each plane
+
+        const color = 0xffffff; // Color of the planes
+
+        // Create small planes using the base position and offsets
+        for (let i = 0; i < 6; i++) {
+            const id = `r${i}`; // Generate ID from r0 to r5
+            const zPosition = basePosition.z + offsets[i]; // Calculate z position using base position and offset
+            createSmallPlaneOnBoard(basePosition.x, zPosition, id, color); // Create plane at specified position
+        }
+
+
+        // Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoardon = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(2, 1.08); // Size of the small plane
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+    
+    smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+    smallPlane.position.set(x, 1.6, z); // Adjust the Y position to be above the board
+    smallPlane.userData = { id: id }; // Assign unique ID
+
+    scene.add(smallPlane); // Add the plane to the scene
+};
+
+// Base position for all small planes
+const basePositiong = { x: 2, z: -9.5 }; // Adjust this for overall position
+const offsetsg = [0, 1.2, 2.4, 3.6, 4.8, 6]; // Offsets for each plane
+
+const colorg = 0xffffff; // Color of the planes
+
+// Create small planes using the base position and offsets
+for (let i = 0; i < 6; i++) {
+    const id = `g${i + 6}`; // Generate ID from g6 to g11
+    const zPosition = basePositiong.z + offsetsg[i]; // Calculate z position using base position and offset
+    createSmallPlaneOnBoardon(basePositiong.x, zPosition, id, color); // Create plane at specified position
+}
+
+
+// Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoardgyp = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(1.08, 2); // Size of the small plane
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+    
+    smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+    smallPlane.position.set(x, 1.6, z); // Adjust the Y position to be above the board
+    smallPlane.userData = { id: id }; // Assign unique ID
+
+    scene.add(smallPlane); // Add the plane to the scene
+};
+
+// Positions and IDs for the planes from g0 to g5
+const planeData = [
+    { x: 3.5, z: -2, id: 'g0' },
+    { x: 4.7, z: -2, id: 'g1' },
+    { x: 5.9, z: -2, id: 'g2' },
+    { x: 7.1, z: -2, id: 'g3' },
+    { x: 8.3, z: -2, id: 'g4' },
+    { x: 9.5, z: -2, id: 'g5' }
+];
+
+// Create all small planes using the same function
+for (const { x, z, id } of planeData) {
+    // Set color to green for g1, otherwise white
+    const color = (id === 'g1') ? 0x00ff00 : 0xffffff; // Green for g1, white for others
+
+    createSmallPlaneOnBoardgyp(x, z, id, color); // Create plane at specified position
+}
+
+
+// Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoardygp = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(1.08, 2); // Size of the small plane
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+    
+    smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+    smallPlane.position.set(x, 1.6, z); // Adjust the Y position to be above the board
+    smallPlane.userData = { id: id }; // Assign unique ID
+
+    scene.add(smallPlane); // Add the plane to the scene
+};
+
+// Positions and IDs for the planes from g0 to g5
+const planeDatayg = [
+    { x: 3.5, z: 2, id: 'y6' },
+    { x: 4.7, z: 2, id: 'y7' },
+    { x: 5.9, z: 2, id: 'y8' },
+    { x: 7.1, z: 2, id: 'y9' },
+    { x: 8.3, z: 2, id: 'y10' },
+    { x: 9.5, z: 2, id: 'y11' }
+];
+
+// Create all small planes using the same function
+for (const { x, z, id } of planeDatayg) {
+    createSmallPlaneOnBoardygp(x, z, id, 0xffffff); // Create plane at specified position
+}
+
+// Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoardbyp = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(1.08, 2); // Size of the small plane
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+    
+    smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+    smallPlane.position.set(x, 1.6, z); // Adjust the Y position to be above the board
+    smallPlane.userData = { id: id }; // Assign unique ID
+
+    scene.add(smallPlane); // Add the plane to the scene
+};
+
+// Positions and IDs 
+const planeDataby = [
+    { x: -3.5, z: 2, id: 'b0' },
+    { x: -4.7, z: 2, id: 'b1' },
+    { x: -5.9, z: 2, id: 'b2' },
+    { x: -7.1, z: 2, id: 'b3' },
+    { x: -8.3, z: 2, id: 'b4' },
+    { x: -9.5, z: 2, id: 'b5' }
+];
+
+// Create all small planes using the same function
+for (const { x, z, id } of planeDataby) {
+    // Set color to blue for b1, otherwise white
+    const color = (id === 'b1') ? 0x0000ff : 0xffffff; // Blue for b1, white for others
+    createSmallPlaneOnBoardbyp(x, z, id, color); // Create plane at specified position
+}
+
+// Function to create a small plane at a specific position on the board
+const createSmallPlaneOnBoardbrp = (x, z, id, color) => {
+    const smallPlaneGeometry = new THREE.PlaneGeometry(1.08, 2); // Size of the small plane
+    const smallPlaneMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use passed color
+    const smallPlane = new THREE.Mesh(smallPlaneGeometry, smallPlaneMaterial);
+    
+    smallPlane.rotation.x = -Math.PI / 2; // Rotate to lie flat
+    smallPlane.position.set(x, 1.6, z); // Adjust the Y position to be above the board
+    smallPlane.userData = { id: id }; // Assign unique ID
+
+    scene.add(smallPlane); // Add the plane to the scene
+};
+
+// Positions and IDs 
+const planeDatabr = [
+    { x: -3.5, z: -2, id: 'r6' },
+    { x: -4.7, z: -2, id: 'r7' },
+    { x: -5.9, z: -2, id: 'r8' },
+    { x: -7.1, z: -2, id: 'r9' },
+    { x: -8.3, z: -2, id: 'r10' },
+    { x: -9.5, z: -2, id: 'r11' }
+];
+
+// Create all small planes using the same function
+for (const { x, z, id } of planeDatabr) {
+    createSmallPlaneOnBoardbrp(x, z, id, 0xffffff); // Create plane at specified position
+}
+
+
+        
+        // Function to create paths
+        const createPath = (x, z, width, length, color) => {
+            const pathGeometry = new THREE.PlaneGeometry(width, length);
+            const pathMaterial = new THREE.MeshPhongMaterial({ color: color }); // Use the passed color
+            const path = new THREE.Mesh(pathGeometry, pathMaterial);
+            path.rotation.x = -Math.PI / 2; // Rotate to lie flat
+            path.position.set(x, 1.52, z); // Position it slightly above the ground
+            scene.add(path);
+        };
+
+        
+        // Create paths for the Ludo game
+        const pathWidth = 2; // Width of each path
+        const pathLength = 8; // Length of each path
+
+        // Create the main paths
+        createPath(0, -6, pathWidth, pathLength, 0xff0000); // Vertical Red Path
+        createPath(0, 6, pathWidth, pathLength, 0xffff00);  // Vertical Green Path
+        createPath(-6, 0, pathLength, pathWidth, 0x0000ff); // Horizontal Blue Path
+        createPath(6, 0, pathLength, pathWidth, 0x00ff00);   // Horizontal Yellow Path
+
+        // Add corners if needed
+        const cornerPathWidth = 2.5;
+        const cornerPathLength = 2.5;
+
+        // Create corner paths (adjust positions as needed)
+        createPath(-6.5, -6.5, cornerPathWidth, cornerPathLength, 0xff0000); // Red Corner
+        createPath(6.5, -6.5, cornerPathWidth, cornerPathLength, 0x00ff00);  // Green Corner
+        createPath(-6.5, 6.5, cornerPathWidth, cornerPathLength, 0x0000ff);  // Blue Corner
+        createPath(6.5, 6.5, cornerPathWidth, cornerPathLength, 0xffff00);   // Yellow Corner
+
+        
+
+        // Camera
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 30, 30);
+        camera.lookAt(0, 0, 0);
+
+        // Renderer
+        const renderer = new THREE.WebGL1Renderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x262626); // Set clear color
+        document.getElementById('threejs-container').appendChild(renderer.domElement);
+
+        // Orbit Controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; 
+        controls.dampingFactor = 0.25;
+        controls.screenSpacePanning = false;
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Responsiveness
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        });
+
+        animate();
+
+        const rollDice = () => {
+            const die1 = Math.floor(Math.random() * 6) + 1; // Roll the first die
+            const die2 = Math.floor(Math.random() * 6) + 1; // Roll the second die
+            const total = die1 + die2;
+        
+            // Display the result in the dice-result div
+            document.getElementById('dice-result').innerText = `Die 1: ${die1}, Die 2: ${die2}, Total: ${total}`;
+            
+            return { total, die1, die2 }; // Return the total and individual rolls
+        };
+        
+        // Add event listener to the button
+        document.getElementById('roll-dice-button').addEventListener('click', rollDice);
+
+        const players = [
+    { color: 'yellow', total: 0 },
+    { color: 'blue', total: 0 },
+    { color: 'red', total: 0 },
+    { color: 'green', total: 0 }
+];
+
+let currentPlayerIndex = 0;
+
+const displayResult = (total) => {
+    const resultDiv = document.getElementById('dice-result');
+    resultDiv.innerHTML = `Current Roll: ${total}`;
+};
+
+const determineStartPlayer = () => {
+    const maxTotal = Math.max(...players.map(player => player.total));
+    const startingPlayer = players.find(player => player.total === maxTotal);
+    
+    // Show popup after a delay
+    setTimeout(() => {
+        alert(`${startingPlayer.color.charAt(0).toUpperCase() + startingPlayer.color.slice(1)} starts first with a total of ${maxTotal}!`);
+    }, 1000); // Delay of 1 seconds
+};
+
+document.getElementById('roll-dice-button').addEventListener('click', () => {
+    // Check if the currentPlayerIndex is within bounds
+    if (currentPlayerIndex < players.length) {
+        // Roll the dice for the current player
+        const { total, die1, die2 } = rollDice();
+
+        // Store the total in the current player's object
+        players[currentPlayerIndex].total = total;
+
+        // Display the current roll result
+        displayResult(total);
+
+        // Move to the next player
+        currentPlayerIndex++;
+
+        // If all players have rolled, determine who goes first
+        if (currentPlayerIndex >= players.length) {
+            // Show results for the last roll before the popup
+            setTimeout(() => {
+                determineStartPlayer();
+                // Reset for the next round
+                players.forEach(player => player.total = 0);
+                currentPlayerIndex = 0; // Reset to yellow for the next round
+            }, 200); // Delay showing the popup for 2 seconds
+        }
+        
+    }
+});
+
+const startingPositions = {
+    yellow: 'y1', // Yellow starts at y1
+    blue: 'b1',   // Blue starts at b1
+    red: 'r1',    // Red starts at r1
+    green: 'g1'   // Green starts at g1
+};
+
+// Define rest and start positions for each player
+const playerPositions = {
+    yellow: { rest: new THREE.Vector3(-2, 1.6, 3.5), start: new THREE.Vector3(-2, 1.6, 4.7) }, // y1
+    blue: { rest: new THREE.Vector3(2, 1.6, -3.5), start: new THREE.Vector3(2, 1.6, -4.7) }, // b1
+    red: { rest: new THREE.Vector3(-2, 1.6, -3.5), start: new THREE.Vector3(-2, 1.6, -4.7) }, // r1
+    green: { rest: new THREE.Vector3(2, 1.6, 3.5), start: new THREE.Vector3(2, 1.6, 4.7) } // g1
+};
+
+let currentPlayer = 'yellow'; // Assume this is set based on who starts
+let rolledTotal = 0; // Store the last rolled total
+
+// Function to move the player's piece
+const movePlayerPiece = (playerColor) => {
+    const piece = createPlayerPiece(playerColor); // Function to create/get the player's piece
+    const { rest, start } = playerPositions[playerColor];
+
+    // Check if the piece is at the rest position before moving
+    if (piece.position.equals(rest)) {
+        // Move the piece to the start position
+        const duration = 1000; // Duration for the move
+        const startTime = performance.now();
+
+        const animateMove = (time) => {
+            const elapsed = time - startTime;
+            const t = Math.min(elapsed / duration, 1); // Normalize to 0-1
+
+            // Interpolate position
+            piece.position.lerpVectors(rest, start, t);
+            if (t < 1) requestAnimationFrame(animateMove);
+        };
+
+        requestAnimationFrame(animateMove);
+    }
+};
+
+// Existing dice roll logic (unchanged)
+const rollDice2 = () => {
+    const die1 = Math.floor(Math.random() * 6) + 1; // Roll the first die
+    const die2 = Math.floor(Math.random() * 6) + 1; // Roll the second die
+    rolledTotal = die1 + die2; // Store the total for later use
+
+    // Display the result in the dice-result div
+    document.getElementById('dice-total').innerText = `Die 1: ${die1}, Die 2: ${die2}, Total: ${rolledTotal}`;
+    
+    return { total: rolledTotal, die1, die2 }; // Return the total and individual rolls
+};
+
+// Add event listener to the new move piece button
+document.getElementById('move-piece-button').addEventListener('click', () => {
+    // Check if the rolled total is greater than 6
+    if (rolledTotal > 6) {
+        movePlayerPiece(currentPlayer); // Move the current player's piece
+    } else {
+        alert(`You need to roll more than 6 to move your piece.`);
+    }
+});
+
+
+        
+    </script>
+</body>
+</html>
