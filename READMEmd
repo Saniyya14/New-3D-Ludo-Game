@@ -1,4 +1,4 @@
-The current code is only some part of the whole pachisi game question created from scratch.
+The current code is only some part of the whole Ludo/pachisi game question created from scratch.
 I used Three.js library to create the game.
 The next steps I, completed adding the paths  , 
 created the dice logic and the game rules logic for initial or starting point of the game 
@@ -7,3 +7,4 @@ Click the roll dice button on the page 4 times and wait for a second , it will t
 To know the position of the game pieces , the path is devided into planes and each one is given an id , eg-y0, y1,...
 The sphere pieces are the game board objects for each player.
 The current game board can be moved around as the orbital controls are added.
+The current code is not organised, will be doing it as i finish building the whole proper game.
